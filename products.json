@@ -1,0 +1,52 @@
+[
+    {
+      "id": 1,
+      "title": "Suculenta Cebra Hawortia #1",
+      "description": "Nombre científico: Aloe sp Suculentas de hojas grandes, carnosas y gruesas que salen de un tallo corto. Normalmente lanceoladas con puntas afiladas y margenes espinosos. Sus colores se mueven entre gris y verde brillante, y sus hojas a vecesson rayadas o moteadas. Sus flores son tubulares, con colores desde amarillo a naranjado hasta rojo.",
+      "price": 100,
+      "status": true,
+      "thumbnail": [],
+      "code": "SCH#1",
+      "stock": 21
+    },
+    {
+      "id": 2,
+      "title": "Echeveria sp. #2",
+      "description": "Plantas elegantes. Sus hojas crecen desde un punto central llamado roceta. Esto le da a la planta una forma de rosa. Tienen una gran variedad de colores y texturas. Los tonos clásicos son el azul grisaceo y gris verdoso. En el interior, esta planta es perfecta para decorar escritorios, ventanas y habitaciones.",
+      "price": 200,
+      "status": true,
+      "thumbnail": [],
+      "code": "ESP#2",
+      "stock": 23
+    },
+    {
+      "id": 3,
+      "title": "Graptoveria sp #3",
+      "description": "Hermosa variedad de planta suculenta, compacta, regordeta y colorida. Tienen formas muy llamativas, la mayoría en forma de roseta compacta. Les gusta mucho la luz directa.",
+      "price": 300,
+      "status": true,
+      "thumbnail": [],
+      "code": "GSP#3",
+      "stock": 900
+    },
+    {
+        "id": 4,
+        "title": "Crassula sp #4",
+        "description": "Suculenta herbácea y perenne que contiene muchas subespecies y varía mucho en el color de sus hojas. Su principal atracción ornamental se observa en la disposición opuesta de las hojas que son bastante compactas y generalmente triangulares.",
+        "price": 400,
+        "status": true,
+        "thumbnail": [],
+        "code": "CSP#4",
+        "stock": 900
+      },
+      {
+        "id": 5,
+        "title": "Euphorbia sp #5",
+        "description": "Este genero pertenece a la familia de las Euforbiaceas. Sus ramas son abundantes de color verde. Tienen una forma cilíndrica y se siembran como individuos separados en el jardín, macetas o terrazas.",
+        "price": 500,
+        "status": true,
+        "thumbnail": [],
+        "code": "ESP#5",
+        "stock": 900
+      }
+  ]
