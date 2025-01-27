@@ -1,120 +1,125 @@
-import passport from "passport";
-import local from "passport-local";
-import jwt from "passport-jwt";
-import bcrypt from "bcrypt";
-import { userRepository, cartRepository } from "../repositories/index.js";
-import config from "./config.js";
+import passport from 'passport';
+import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
+import { Strategy as GitHubStrategy } from 'passport-github2'; //Github
+import { Strategy as GoogleStrategy } from 'passport-google-oauth20'; //GoogleStrategy
+import { config } from "dotenv";
+import User from '../dao/models/user.model.js';
+import Cart from '../dao/models/cart.model.js';
+config();
 
-const LocalStrategy = local.Strategy;
-const JWTStrategy = jwt.Strategy;
-const ExtractJWT = jwt.ExtractJwt;
+const jwtSecret = process.env.JWT_SECRET;
+
+const cookieExtractor = (req) => {
+    let token = null;
+    if (req && req.cookies) {
+        token = req.cookies['token'];
+    }
+    return token;
+};
+
+const JWTOptions = {
+    jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor]),
+    secretOrKey: jwtSecret
+};
 
 const initializePassport = () => {
-  passport.use(
-    "register",
-    new LocalStrategy(
-      {
-        usernameField: "email",
-        passwordField: "password",
-        passReqToCallback: true,
-      },
-      async (req, email, password, done) => {
+    passport.use("jwt", new JwtStrategy(JWTOptions, async (jwt_payload, done) => {
         try {
-          const existingUser = await userRepository.getByEmail(email);
-          if (existingUser) {
-            return done(null, false, {
-              message: "El correo electrónico ya está registrado",
-            });
-          }
-
-          const hashedPassword = await bcrypt.hash(password, 10);
-          const cart = await cartRepository.create();
-
-          const userData = {
-            ...req.body,
-            password: hashedPassword,
-            cart: cart.id,
-          };
-
-          const newUser = await userRepository.create(userData);
-          done(null, newUser);
+            const user = await User.findById(jwt_payload.userId);
+            if (user) {
+                return done(null, user);
+            } else {
+                return done(null, false);
+            }
         } catch (error) {
-          done(error);
+            return done(error, false);
         }
-      }
-    )
-  );
+    }));
 
-  passport.use(
-    "login",
-    new LocalStrategy(
-      {
-        usernameField: "email",
-        passwordField: "password",
-      },
-      async (email, password, done) => {
+    // Estrategia de Github
+    passport.use('github', new GitHubStrategy({
+        clientID: process.env.GITHUB_CLIENT_ID,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET,
+        callbackURL: process.env.GITHUB_CALLBACK_URL
+    }, async (accessToken, refreshToken, profile, done) => {
         try {
-          const user = await userRepository.getByEmail(email);
+            let user = await User.findOne({ email: profile._json.email });
+            if (!user) {
+                user = new User({
+                    first_name: profile._json.name,
+                    last_name: '',
+                    email: profile._json.email,
+                    password: '',
+                    age: 18,
+                });
+                await user.save();
 
-          if (!user) {
-            return done(null, false, {
-              message: "Usuario no encontrado",
-            });
-          }
+                const newCart = new Cart({ user: user._id, items: [] });
+                await newCart.save();
 
-          const isValidPassword = await bcrypt.compare(password, user.password);
-          if (!isValidPassword) {
-            return done(null, false, {
-              message: "Contraseña incorrecta",
-            });
-          }
-
-          return done(null, user);
+                user.cart = newCart._id;
+                await user.save();
+            }
+            return done(null, user);
         } catch (error) {
-          return done(error);
+            return done(error);
         }
-      }
-    )
-  );
+    }));
 
-  passport.use(
-    "jwt",
-    new JWTStrategy(
-      {
-        jwtFromRequest: ExtractJWT.fromExtractors([
-          ExtractJWT.fromAuthHeaderAsBearerToken(),
-          (req) => req.cookies.jwt,
-        ]),
-        secretOrKey: config.jwt.secret,
-      },
-      async (jwtPayload, done) => {
+    // Estrategia de Google
+    passport.use(new GoogleStrategy({
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: process.env.GOOGLE_CALLBACK_URL,
+    }, async (accessToken, refreshToken, profile, done) => {
         try {
-          const user = await userRepository.getById(jwtPayload.id);
-          if (!user) {
-            return done(null, false, {
-              message: "No se encontró el usuario asociado al token",
-            });
-          }
-          return done(null, user);
+            // Busca al usuario por el email proporcionado por Google
+            let user = await User.findOne({ email: profile._json.email });
+
+            if (!user) {
+                // Si el usuario no existe, creamos un nuevo usuario usando Google como proveedor
+                user = new User({
+                    first_name: profile._json.given_name,
+                    last_name: profile._json.family_name,
+                    email: profile._json.email,
+                    provider: 'google',  // Añadimos el proveedor como 'google'
+                    // No establecemos una contraseña ya que es un usuario de Google
+                    age: 18,  // Si la edad es requerida, puedes establecer un valor por defecto
+                });
+                await user.save();
+
+                // Crear un carrito para el nuevo usuario
+                const newCart = new Cart({ user: user._id, items: [] });
+                await newCart.save();
+
+                user.cart = newCart._id;
+                await user.save();
+            } else if (user.provider !== 'google') {
+                // Si el usuario ya existe pero no se registró con Google, actualizamos el proveedor
+                user.provider = 'google';
+                await user.save();
+            }
+
+            return done(null, user);
         } catch (error) {
-          return done(error);
+            return done(error);
         }
-      }
-    )
-  );
+    }));
 
-  passport.serializeUser((user, done) => {
-    done(null, user.id);
-  });
+    // Serialización de usuario para la sesión
+    passport.serializeUser((user, done) => {
+        done(null, user._id);
+    });
 
-  passport.deserializeUser(async (id, done) => {
-    try {
-      const user = await userRepository.getById(id);
-      done(null, user);
-    } catch (error) {
-      done(error);
-    }
-  });
+    // Deserialización de usuario
+    passport.deserializeUser(async (id, done) => {
+        try {
+            const user = await User.findById(id);
+            done(null, user);
+        } catch (error) {
+            done(error);
+        }
+    });
 };
 
 export default initializePassport;

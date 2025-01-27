@@ -1,100 +1,134 @@
 import express from "express";
-import handlebars from "express-handlebars";
-import http from "http";
+import passport from "passport";
+import cookieParser from "cookie-parser";
 import session from "express-session";
 import MongoStore from "connect-mongo";
-import cookieParser from "cookie-parser";
-import passport from "passport";
-import mongoose from "mongoose";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-import { config } from "./config/config.js";
 import initializePassport from "./config/passport.config.js";
-import { errorHandler } from "./middlewares/errorHandler.js";
-import viewsRouter from "./routes/viewsRouter.js";
-import productRouter from "./routes/productRouter.js";
-import cartRouter from "./routes/cartRouter.js";
-import sessionsRouter from "./routes/sessions.router.js";
-import passwordRouter from "./routes/passwordRouter.js";
-import { initializeSocket } from "./config/socket.js";
-import helpers from "./utils/helpersHandlebars.js";
+import { engine } from "express-handlebars";
+import { Server } from "socket.io";
+import config from './config/config.js';
+import { swaggerDocs } from './config/swagger.js';
+import productsRouter from "./routes/products.routes.js";
+import cartRouter from "./routes/cart.routes.js";
+import userRouter from "./routes/user.routes.js";
+import orderRouter from "./routes/order.routes.js";
+import viewsRouter from "./routes/views.routes.js";
+import sessionRouter from "./routes/session.routes.js";
+import adminRouter from "./routes/admin.routes.js";
+import { errorHandler, notFoundHandler } from "./middlewares/error.middleware.js";
+import { checkUserSession } from "./middlewares/auth.middleware.js";
+import ProductManager from './dao/db/productManagerDb.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import "./db.js";
+import bodyParser from 'body-parser';
+import { repairCarts } from './utils/cartRepair.js';
+import cors from "cors";
+import {MercadoPagoConfig, Preference} from "mercadopago";
+//npm i express cors mercadopago
+const PUERTO = 8080; 
+
 
 const app = express();
-const PORT = config.server.port;
-const server = http.createServer(app);
-initializeSocket(server);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const PORT = process.env.PORT || 8080;
 
-const hbs = handlebars.create({
-  helpers: {
-    ...helpers,
-    isSelected: function (value, sort) {
-      return value === sort ? "selected" : "";
-    },
-    eq: function (a, b) {
-      return a === b;
-    },
-  },
-});
+const client = new MercadoPagoConfig({accessToken: "1234"});
 
-app.engine("handlebars", hbs.engine);
-app.set("views", __dirname + "/views");
-app.set("view engine", "handlebars");
-
-app.use(express.static(__dirname + "/public"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(bodyParser.json());
 app.use(cookieParser());
 
-const connectToDatabase = async () => {
-  try {
-    await mongoose.connect(config.database.mongoUri);
-    console.log("Conectado con MongoDB");
+app.use(session({
+    store: MongoStore.create({
+        mongoUrl: config.mongodbUri,
+        ttl: 60 * 60
+    }),
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: false
+}));
 
-    app.use(
-      session({
-        secret: config.session.secret,
-        resave: false,
-        saveUninitialized: false,
-        store: MongoStore.create({
-          client: mongoose.connection.getClient(),
-          ttl: 60 * 60 * 24,
-        }),
-        cookie: {
-          maxAge: 1000 * 60 * 60 * 24,
-          httpOnly: true,
-          secure: config.server.nodeEnv === "production",
+swaggerDocs(app, PORT);
+
+initializePassport();
+app.use(passport.initialize());
+app.use(passport.session());
+
+app.use(checkUserSession);
+
+const productManager = new ProductManager();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use((req, res, next) => {
+    // console.log('Session:', req.session);
+    // console.log('User:', req.user);
+    // console.log('User in session:', res.locals.user);
+    next();
+});
+
+app.engine('handlebars', engine({
+    runtimeOptions: {
+        allowProtoPropertiesByDefault: true,
+        allowProtoMethodsByDefault: true,
+    },
+    helpers: {
+        formatNumber: (number, decimals = 2) => {
+            if (number === null || number === undefined || isNaN(number)) {
+                return 'N/A';
+            }
+            return Number(number).toFixed(decimals);
         },
-      })
-    );
+        eq: (v1, v2) => v1 === v2,
+        or: (v1, v2) => v1 || v2,
+        gt: (a, b) => a > b,
+        and: (v1, v2) => v1 && v2,
+        not: v => !v,
+        ternary: (cond, v1, v2) => cond ? v1 : v2,
+        formatDate: (date) => new Date(date).toLocaleString()
+    }
+}));
 
-    initializePassport();
-    app.use(passport.initialize());
-    app.use(passport.session());
+app.set('view engine', 'handlebars');
+app.set('views', './src/views');
 
-    app.use((req, res, next) => {
-      res.locals.user = req.session.user;
-      res.locals.isAuthenticated = req.isAuthenticated();
-      next();
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.use("/api/products", productsRouter);
+app.use("/api/carts", cartRouter);
+app.use("/api/users", userRouter);
+app.use("/api/orders", orderRouter);
+app.use('/api/sessions', sessionRouter);
+app.use('/admin', adminRouter);
+app.use('/', viewsRouter);
+
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+
+
+const httpServer = app.listen(config.port, async () => {
+    console.log(`Servidor escuchando en el puerto ${config.port}`);
+    swaggerDocs(app, config.port);
+    await repairCarts();
+});
+
+const io = new Server(httpServer);
+
+io.on("connection", async (socket) => {
+    // console.log("Nuevo cliente conectado");
+
+    const initialProducts = await productManager.getProducts(1, 15);
+    socket.emit('products', initialProducts);
+
+    socket.on('requestPage', async ({ page, limit, sort }) => {
+        const products = await productManager.getProducts(page, limit, sort);
+
+        socket.emit('products', products);
     });
+});
 
-    app.use("/api/products", productRouter());
-    app.use("/api/carts", cartRouter());
-    app.use("/api/sessions", sessionsRouter);
-    app.use("/api/password", passwordRouter);
-
-    app.use("/", viewsRouter);
-
-    app.use(errorHandler);
-
-    server.listen(PORT, () => {
-      console.log(`Servidor corriendo en puerto ${PORT}`);
-    });
-  } catch (error) {
-    console.error("Error al conectar con MongoDB:", error);
-    process.exit(1);
-  }
-};
-
-connectToDatabase();
+export default app;
