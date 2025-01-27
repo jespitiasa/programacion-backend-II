@@ -1,153 +1,80 @@
-import express from "express";
-import passport from "passport";
-import { userRepository } from "../repositories/index.js";
-import { generateToken } from "../utils/jwt.js";
+import { Router } from "express";
+import { isAuthenticated } from "../middlewares/auth.middleware.js";
+import { register, login, logout, getCurrentUser, githubCallback, googleCallback } from '../controllers/user.controller.js';
+import passport from 'passport';
 
-const router = express.Router();
+const router = Router();
 
-router.post(
-  "/register",
-  passport.authenticate("register", { session: false }),
-  async (req, res, next) => {
-    try {
-      res.status(201).json({
-        status: "success",
-        payload: {
-          user: req.user.toSafeObject(),
-        },
-        message: "Usuario registrado exitosamente",
-      });
-    } catch (error) {
-      next(error);
+/**
+ * @swagger
+ * /api/sessions/login:
+ *   post:
+ *     summary: Login user
+ *     tags: [Session]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login su
+ *       401:
+ *         description: Invalid 
+ *       500:
+ *         description: Internal
+ */
+router.post('/login', login);
+
+router.post('/register', register);
+
+/**
+ * @swagger
+ * /api/sessions/logout:
+ *   post:
+ *     summary: Logout current user
+ *     tags: [Session]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ *       401:
+ *         description: Unauthorized access
+ *       500:
+ *         description: Internal server error
+ */
+router.post("/logout", logout);
+
+router.get("/current", isAuthenticated, getCurrentUser);
+
+router.get("/user", isAuthenticated, getCurrentUser);
+
+router.get("/check-auth", (req, res) => {
+    if (req.isAuthenticated()) {
+        res.json({ isAuthenticated: true, user: req.user });
+    } else {
+        res.json({ isAuthenticated: false });
     }
-  }
-);
-
-router.post("/login", (req, res, next) => {
-  passport.authenticate(
-    "login",
-    { session: false },
-    async (err, user, info) => {
-      try {
-        if (err) {
-          return res.status(500).json({
-            status: "error",
-            error: err.message,
-            details: "Error interno del servidor",
-          });
-        }
-
-        if (!user) {
-          return res.status(401).json({
-            status: "error",
-            error: "UNAUTHORIZED",
-            message: info?.message || "Credenciales inválidas",
-            details: {
-              reason: "Autenticación fallida",
-              action: "Verifique sus credenciales",
-            },
-          });
-        }
-
-        req.login(user, { session: false }, async (error) => {
-          if (error) {
-            return res.status(500).json({
-              status: "error",
-              error: error.message,
-              details: "Error al iniciar sesión",
-            });
-          }
-
-          const token = generateToken(user);
-          await userRepository.update(user.id, { last_connection: new Date() });
-
-          res.cookie("jwt", token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-          });
-
-          req.session.user = user.toSafeObject();
-
-          return res.redirect('/');
-        });
-      } catch (error) {
-        return res.status(500).json({
-          status: "error",
-          error: error.message,
-          details: "Error inesperado durante el login",
-        });
-      }
-    }
-  )(req, res, next);
 });
 
-router.post("/logout", async (req, res) => {
-  try {
-    if (req.user) {
-      await userRepository.update(req.user.id, { last_connection: new Date() });
-    }
+router.post('/register', register);
 
-    res.clearCookie("jwt");
+// Rutas de autenticación con GitHub
+router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
+router.get('/github/callback', passport.authenticate('github', { failureRedirect: '/login' }), githubCallback);
 
-    if (req.session) {
-      req.session.destroy();
-    }
-
-    const acceptHeader = req.get('Accept') || '';
-    if (acceptHeader.includes('application/json')) {
-      return res.status(200).json({
-        status: "success",
-        message: "Sesión cerrada exitosamente"
-      });
-    }
-
-    return res.redirect('/login');
-  } catch (error) {
-    console.error("Error en logout:", error);
-    return res.status(500).json({
-      status: "error",
-      error: error.message,
-      details: "Error al cerrar la sesión"
-    });
-  }
-});
-
-router.get("/current", (req, res) => {
-  passport.authenticate("jwt", { session: false }, (err, user, info) => {
-    if (err) {
-      return res.status(500).json({
-        status: "error",
-        error: err.message,
-        details: "Error al verificar autenticación",
-      });
-    }
-
-    if (!user) {
-      return res.status(401).json({
-        status: "error",
-        error: "UNAUTHORIZED",
-        message: info?.message || "No autorizado",
-        details: {
-          reason: "Token no válido o expirado",
-          action: "Por favor, inicie sesión nuevamente",
-        },
-      });
-    }
-
-    return res.json({
-      status: "success",
-      payload: {
-        user: {
-          id: user.id,
-          email: user.email,
-          first_name: user.first_name,
-          last_name: user.last_name,
-          role: user.role,
-          cart: user.cart,
-        },
-      },
-    });
-  })(req, res);
-});
+// Rutas de autenticación con Google
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), googleCallback);
 
 export default router;

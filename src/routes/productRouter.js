@@ -1,114 +1,131 @@
-import express from "express";
-import {
-  checkRole,
-  checkProductPermissions,
-  ROLES,
-} from "../middlewares/auth.js";
-import { productRepository } from "../repositories/index.js";
-import { ValidationError, NotFoundError } from "../utils/errorHandler.js";
+import { Router } from "express";
+import { getProducts, getProductById, createProduct, updateProduct, deleteProduct, getCategories  } from '../controllers/product.controller.js';
+import { isAuthenticated, isAdmin } from '../middlewares/auth.middleware.js';
 
-const productRouter = () => {
-  const router = express.Router();
+const router = Router();
 
-  router.use((req, res, next) => {
-    res.set("Content-Type", "application/json");
-    res.set("Access-Control-Allow-Origin", "*");
-    next();
-  });
+router.get('/categories', getCategories);
 
-  router.get("/", async (req, res, next) => {
-    try {
-      const { page = 1, limit = 10, sort, query, category } = req.query;
+/**
+ * @swagger
+ * /api/products:
+ *   get:
+ *     summary: Get all products
+ *     tags: [Products]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: The number of items to return
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *         description: The page number
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved products
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/', getProducts);
 
-      let filter = {};
-      if (query) {
-        filter.$or = [
-          { title: { $regex: query, $options: "i" } },
-          { description: { $regex: query, $options: "i" } },
-        ];
-      }
-      if (category) {
-        filter.category = category;
-      }
+/**
+ * @swagger
+ * /api/products/{pid}:
+ *   get:
+ *     summary: Get a product by ID
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: pid
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved product
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get("/:pid", getProductById);
 
-      const options = {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        sort: sort ? { price: sort === "asc" ? 1 : -1 } : undefined,
-        filter,
-      };
+/**
+ * @swagger
+ * /api/products/{pid}:
+ *   put:
+ *     summary: Update a product
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: pid
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               price:
+ *                 type: number
+ *               description:
+ *                 type: string
+ *               category:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Product updated successfully
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         description: Unauthorized access
+ *       403:
+ *         description: Forbidden - Not an admin
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Internal server error
+ */
+router.put("/:pid", isAuthenticated, isAdmin, updateProduct);
 
-      const products = await productRepository.getAll(options);
-      res.json({ status: "success", data: products });
-    } catch (error) {
-      next(error);
-    }
-  });
+/**
+ * @swagger
+ * /api/products/{pid}:
+ *   delete:
+ *     summary: Delete a product from Stock
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: pid
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Product deleted successfully
+ *       401:
+ *         description: Unauthorized access
+ *       403:
+ *         description: Forbidden - Not an admin
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Internal server error
+ */
+router.delete("/:pid", isAuthenticated, isAdmin, deleteProduct);
 
-  router.get("/:id", async (req, res, next) => {
-    try {
-      const product = await productRepository.getById(req.params.id);
-      if (!product) {
-        throw new NotFoundError("Producto no encontrado");
-      }
-      res.json({ status: "success", data: product });
-    } catch (error) {
-      next(error);
-    }
-  });
+router.post("/", isAuthenticated, isAdmin, createProduct);
 
-  router.post(
-    "/",
-    checkRole([ROLES.ADMIN]),
-    checkProductPermissions,
-    async (req, res, next) => {
-      try {
-        if (!req.body.title || !req.body.price) {
-          throw new ValidationError("Título y precio son requeridos");
-        }
-        const product = await productRepository.create(req.body);
-        res.status(201).json({ status: "success", data: product });
-      } catch (error) {
-        next(error);
-      }
-    }
-  );
-
-  router.put(
-    "/:id",
-    checkRole([ROLES.ADMIN]),
-    checkProductPermissions,
-    async (req, res, next) => {
-      try {
-        const product = await productRepository.update(req.params.id, req.body);
-        if (!product) {
-          throw new NotFoundError("Producto no encontrado");
-        }
-        res.json({ status: "success", data: product });
-      } catch (error) {
-        next(error);
-      }
-    }
-  );
-
-  router.delete(
-    "/:id",
-    checkRole([ROLES.ADMIN]),
-    checkProductPermissions,
-    async (req, res, next) => {
-      try {
-        const result = await productRepository.delete(req.params.id);
-        if (!result) {
-          throw new NotFoundError("Producto no encontrado");
-        }
-        res.json({ status: "success", message: "Producto eliminado" });
-      } catch (error) {
-        next(error);
-      }
-    }
-  );
-
-  return router;
-};
-
-export default productRouter;
+export default router;
